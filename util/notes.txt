@@ -1,0 +1,20 @@
+make_iso.pl seems to have problems.
+
+No files being put in the directory /data1/pgiso_temp
+
+Empty index (no files) if it is plain text, or HTML.
+Logged out, or not.
+Single/multi/alpha-page index file.
+From an existing published collection: same problem
+
+Test:
+ - a new session?
+ - updated rdf info
+
+*** Seems that the -c is a difference.  If it is saved
+as a collection, works ok.  No collection, and it doesn't.
+
+There is also a difference with session names v. login
+names, but I'm not sure that matters (earlier experimentation
+didn't show a difference).  
+

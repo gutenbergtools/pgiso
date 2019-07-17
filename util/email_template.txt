@@ -1,0 +1,26 @@
+The ISO creation process has completed.  Your ISO file is ready to download...
+
+The file is available at the following address:
+  _FTP_URL_
+  MD5 Checksum: _MD5_CHECKSUM_
+  File size: _SIZEOUTPUT_
+
+  ** But wait!	If you saw "File size: 376832", chances are your ISO
+     is not populated.	This is most likely because you did not
+     actually select any eBooks for your image.	 If you didn't get a
+     listing of book titles, formats, and sizes - along with a line at
+     the bottom of the "Add files" telling you how many ETexts Total
+     you have, then you did not add any to the collection.
+
+     In that case, please go back and make a new collection, by adding
+     files and formats.	 Then, you can try again to make an ISO.
+     You'll get a new email like this, with a new link.
+
+Once you have a successful ISO, you have up to two weeks to download
+this file before it is deleted.
+
+For more information about Project Gutenberg, visit www.gutenberg.org
+and the CD Project Page at www.gutenberg.org/cdproject
+
+Hugs, and great literature,
+  The Project Gutenberg Team
