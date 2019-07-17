@@ -1,0 +1,179 @@
+/* link effects */
+a { text-decoration: none; }
+a:link { color: #b76b15; }
+a:visited { color: #b76b15; }
+a:hover { color: black; }
+
+/* set textarea font to make it more uniform across browsers */
+textarea
+{
+  font-family: Courier;
+  font-size: 12px;
+} 
+
+body
+{
+  font-family: "Times New Roman";
+  color: black;
+}
+
+body table.pageinfo
+{
+  border-width: 0px;
+  font-size: 10pt;
+}
+
+body table.pageinfo tr { border-width: 0px; }
+
+body table.pageinfo tr td
+{
+  border-width: 0px;
+  font-size: 9pt;
+}
+
+/* general table appearance */
+body table
+{
+  border: 1px solid #e6a336;
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+
+body table tr.darkrow
+{
+  border: 1px solid #e6a336;
+  background-color: #f5d8ae;
+}
+
+body table tr.lightrow
+{
+  border: 1px solid #e6a336;
+  background-color: #fbf7ed;
+}
+
+body table tr td { border: 1px solid #e6a336; }
+
+/* div blocks in main body */
+body div { width: 600px; }
+
+body div.caption
+{
+  width: 588px;
+  border-style: solid;
+  border-color: #e6a336;
+  padding: 5px;
+  font-weight: bold;
+  background-color: #f5d8ae;
+  border-width: 1px 1px 0 1px;
+  font-size: 12pt;
+  color: #b76b15;
+}
+
+body div.content
+{
+  width: 588px;
+  border: 1px solid #e6a336;
+  padding: 5px;
+  font-weight: bold;
+  background-color: #fbf7ed;
+  font-size: 10pt;
+}
+
+body div.content table.selectors { border-width: 0px; }
+body div.content table.selectors td { border-width: 0px; }
+
+body div.collstats
+{
+  width: 588px;
+  text-align: left;
+  border: 1px solid #e6a336;
+  padding: 5px;
+  background-color: #fbf7ed;
+  font-size: 10pt;
+}
+
+/* the invisible div to contain things like user options
+   and login name on top of every page */
+body div.topbox
+{
+  width: 600px;
+  height: 16px;
+  font-size: 9pt;
+}
+
+body div.topbox div.left
+{
+  width: 400px;
+  float: left;
+  text-align: left;
+}
+
+body div.topbox div.right
+{
+  width: 200px;
+  float: right;
+  text-align: right;
+}
+
+/* formatting for the checkbox cell in collection view */
+body table tr td.checkbox
+{
+  float: left;
+  width: 20px;
+  border-width: 0px 1px 0px 0px;
+  padding: 6px;
+}
+
+/* the table that contains total number of etexts and ISO size
+   listed at the bottom of etext lists */
+body table.total
+{
+  border: 1px solid #e6a336;
+  font-size: 10pt;
+}
+
+body table.total tr td { border-width: 0px; }
+body table.total tr td.left { padding-left: 3px; }
+body table.total tr td.right { padding-right: 3px; }
+
+/* the table that lists both private and published collections */
+body table.collection tr td.caption
+{
+  text-align: center;
+  font-size: 12pt;
+  font-weight: bold;
+  color: #b76b15;
+  padding: 5px;
+}
+
+body table.collection tr td
+{
+  border-width: 0px;
+  font-size: 10pt;
+}
+
+body table.collection tr td.title { padding-left: 3px; }
+body table.collection tr td.title span { font-size: 10pt; }
+
+body table.collection tr td.actions
+{
+  text-align: right;
+  padding-left: 3px;
+  padding-right: 3px;
+}
+
+/* divs that contain forms, such as user login and registration */
+body div.content form table
+{
+  border-width: 0px;
+  font-size: 12pt;
+}
+
+body div.content form table tr { border-width: 0px; }
+
+body div.content form table tr td
+{
+  border-width: 0px;
+  padding-left: 5px;
+  padding-right: 5px;
+}

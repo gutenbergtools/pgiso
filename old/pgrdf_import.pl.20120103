@@ -1,0 +1,277 @@
+#!/usr/bin/perl -Wall 
+
+########################################
+# Coded by Craig Stephenson            #
+# Arctic Region Supercomputing Center  #
+# University of Alaska Fairbanks       #
+# August 2005                          #
+# Updated by Greg Newby, December 2009 #
+# and December 2011                    #
+########################################
+
+use XML::LibXML;
+use DBI;
+use File::Basename;
+use File::stat;
+use Switch;
+
+# Set the paths for files, these will be inserted into the database
+my $path = "/home/gbnewby/pgiso/pgrdf/";
+my $mirrorpath = "/data1/ftp/mirrors/gutenberg/";
+
+my %mimetypes = (
+#  "text/plain; charset=\"utf-8\"" => "txt-utf8",
+#  "text/plain; charset=\"us-ascii\"" => "txt-usascii",
+    "text/plain" => "txt",
+    "text/html" => "htm",
+    "text/rtf" => "rtf",
+    "text/xml" => "xml",
+    "application/pdf" => "pdf",
+    "application/vnd.palm" => "pdb",
+    "application/postscript" => "ps",
+    "application/octet-stream; type=\"MS Video (avi)\"" => "avi",
+    "application/octet-stream; type=\"MS Lit for PocketPC (lit)\"" => "lit",
+    "application/octet-stream; type=\"MS Word Document (doc)\"" => "doc",
+    "application/octet-stream; type=\"MS Wave Audio\"" => "wav",
+    "application/octet-stream; type=\"TeX (tex)\"" => "tex",
+    "application/octet-stream; type=\"MIDI (mid)\"" => "mid",
+    "application/octet-stream; type=\"LilyPond (ly)\"" => "ly",
+    "video/mpeg" => "mpg",
+    "video/quicktime" => "mov",
+    "audio/mpeg" => "mp3",
+    "audio/midi" => "mid",
+#  "audio/midi" => "midi",
+    "image/jpeg" => "jpg",
+    "image/tiff" => "tif"
+    );
+
+# MySQL connection info
+my $mysql_host = "localhost";
+my $mysql_sock = "/var/lib/mysql/mysql.sock";
+my $mysql_database = "gutenberg";
+my $mysql_username = "pgdbupdate";
+my $mysql_password = "sealab2021";
+
+# connect to MySQL and prepare for UTF-8 input/output
+my $dbh = DBI->connect("DBI:mysql:mysql_socket=$mysql_sock:$mysql_database:$mysql_host", $mysql_username, $mysql_password);
+if (! $dbh) { die "DBI->connect failed: $!" };
+$dbh->do("SET NAMES 'utf8'");
+
+# We will write into a temporary table, then rename the original:
+$dbh->do("drop table if exists formats_sizes_temp");
+$dbh->do("create table formats_sizes_temp (  `id` int(11) DEFAULT NULL,  `title` text,  `author` text,  `language` varchar(2) DEFAULT NULL,  `format` varchar(15) DEFAULT NULL,  `size` bigint(20) DEFAULT NULL,  `files` text,  `copyright` tinyint(1) DEFAULT NULL,  KEY `id_format` (`id`,`format`)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+# download and decompress rdf catalog file
+system("rm " . $path . "catalog.rdf.bz2 " . $path . "catalog.rdf 2> /dev/null");
+system("wget -q --user-agent=\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.6; rv:8.0.1) Gecko/20100101 Firefox/8.0.1\" -O " . $path . "catalog.rdf.bz2 http://www.gutenberg.org/feeds/catalog.rdf.bz2");
+system("bunzip2 " . $path . "catalog.rdf.bz2");
+
+# catalog.rdf is in utf-8 so stdout should be utf-8 too
+binmode(STDOUT, ':utf8');
+
+# parse catalog.rdf
+my $parser = XML::LibXML->new();
+$parser->keep_blanks (0);
+my $doc = $parser->parse_file($path . 'catalog.rdf');
+
+# %books stores the XML metadata, it looks like this:
+#
+# %books --> (etext_no) --> titles
+#                       \-> authors
+#                       \-> language
+#                       \-> files --> txt --> (file URLs)
+#                                 \-> zip-txt --> (file URLs)
+#                                 \-> htm --> (file URLs)
+#                                 \-> zip-htm --> (file URLs)
+#                                 \-> ...
+my %books;
+
+### Parse book nodes, for all etexts
+my @booknodes = $doc->findnodes('/rdf:RDF/pgterms:etext');
+
+# Populate our etext description nodes:
+foreach my $booknode(@booknodes) {
+
+    my $etext_no = $booknode->getAttribute('rdf:ID');
+    $etext_no =~ s/^etext//;
+
+    my $o = {};
+
+    foreach $title ($booknode->findnodes('dc:title//text()')) {
+	push @{$o->{'titles'}}, $title->textContent;
+    }
+    foreach $creator ($booknode->findnodes('dc:creator//text()')) {
+	push @{$o->{'authors'}}, $creator->textContent;
+    }
+    foreach $language ($booknode->findnodes('dc:language//text()')) {
+	push @{$o->{'language'}}, $language->textContent;
+    }
+    foreach $rights ($booknode->findnodes('dc:rights//text()')) {
+	push @{$o->{'rights'}}, $rights->textContent;
+    }
+    $books{$etext_no} = $o;
+}
+
+# release some memory
+@booknodes = undef;
+
+### Parse file nodes.  These are all the files for all etexts
+my @filenodes = $doc->findnodes('/rdf:RDF/pgterms:file');
+
+### Loop over each file
+
+foreach my $filenode (@filenodes) {
+
+    foreach my $n ($filenode->findnodes('dcterms:isFormatOf')) {
+	my @vnformats;
+
+	# this is a file description node
+	my $etext_no = $n->getAttribute('rdf:resource');
+	$etext_no =~ s/^\#etext//;
+
+	foreach my $fn ($filenode->findnodes('dc:format')) {
+	    my @imtns = $fn->findnodes('dcterms:IMT');
+	    my $imtn = pop(@imtns);
+	    my @vns = $imtn->findnodes('rdf:value');
+	    my $vn = pop(@vns);
+	    push @vnformats, $vn->textContent;
+	}
+
+	foreach my $mime(keys %mimetypes) {
+	    $qmime = quotemeta($mime);
+	    if(grep(/application\/zip/, @vnformats) && grep(/$qmime/, @vnformats)) {
+		my $zipsymbol = "zip-" . $mimetypes{$mime};
+		$relpath = $filenode->getAttribute('rdf:about');
+		$relpath =~ s/http:\/\/www\.gutenberg\.org\/dirs\///;
+		push @{$books{$etext_no}->{'files'}{$zipsymbol}}, $relpath;
+		last;
+	    } elsif(grep(/$qmime/, @vnformats)) {
+		$relpath = $filenode->getAttribute('rdf:about');
+		$relpath =~ s/http:\/\/www\.gutenberg\.org\/dirs\///;
+# Adjust for an inconsistency for generated files in cache/generated:
+# http://www.gutenberg.org/cache/epub/ --> cache/generated/
+		$relpath =~ s/http:\/\/www\.gutenberg\.org\/cache\/epub\//cache\/generated\//;
+		push @{$books{$etext_no}->{'files'}{$mimetypes{$mime}}}, $relpath;
+		last;
+	    }
+	}
+    }
+}
+
+# release some memory
+@filenodes = undef;
+$doc = undef;
+
+while(my ($etext_no, $o) = each(%books)) {
+    my $titles='';
+    my $authors='';
+    my $language='';
+    my $copyrighted='';
+    my $sql=''; my $firstsql=1;
+
+    foreach(@{$o->{'titles'}}) {
+	$titles .= "$_;";
+    }
+    chop($titles); 
+
+    foreach(@{$o->{'authors'}}) {
+	$authors .= "$_;";
+    }
+    chop($authors);
+
+    foreach(@{$o->{'language'}}) {
+	$language .= substr($_, 0, 2) . ";";
+    }
+    chop($language);
+
+    $copyrighted = 0;
+    foreach(@{$o->{'rights'}}) {
+	if($_ eq "Copyrighted work. See license inside work.") {
+	    $copyrighted = 1;
+	}
+    }
+
+### create a row insertion statement for each format for this etext
+    foreach my $key(keys %{$books{$etext_no}->{'files'}}) {
+	my $size=0;
+	
+	foreach my $relpath(@{$books{$etext_no}->{'files'}{$key}}) {
+	    my $filepath = $mirrorpath . $relpath;
+	    $size += rfilesize($filepath);
+	}
+	
+# We will aggregate all of the SQL values into one query, for this title:
+	if ($firstsql) {
+	    $sql = "INSERT INTO formats_sizes_temp VALUES ";
+	    $firstsql=0;
+	} else {
+	    $sql = $sql . ", "; # delimeter for multiple sets of values
+	}
+
+	# Append the new set of values:
+	$sql = $sql . "('" . $etext_no . "','" . quotemeta($titles) . "','"
+	    . quotemeta($authors) . "','" . $language . "','" . $key . "','"
+#	    . $size . "','" . join(";", @{$books{$etext_no}->{'files'}{$key}})
+	    . $size . "','" . quotemeta(join(";", @{$books{$etext_no}->{'files'}{$key}}))
+	    . "'," . $copyrighted . ")";
+    }
+
+### Actually insert the data for this title into the database:
+
+# Test for empty sql string.  This happens sometimes: entries without files
+    if ($sql ne '') {
+	$dbh->do($sql);
+    }
+
+# Clear variables for next title:
+    $sql="";
+    foreach $key(keys %formatfiles) {
+	undef(@{$formatfiles{$key}});
+	undef($formatfiles{$key});
+	undef(@{$sizes{$key}});
+	undef($sizes{$key});
+    }
+    undef(@formatfiles);
+
+# Done with this etext.  Back for the next one
+}
+
+### We're done with all etexts.  Rename the database table:
+$dbh->do("drop table if exists formats_sizes");
+$dbh->do("rename table formats_sizes_temp to formats_sizes");
+
+### All done.  Bye!
+$dbh->disconnect();
+exit;
+
+
+#####
+# recursive file size function
+sub rfilesize {
+    my $location = $_[0];
+    my $totalsize=0;
+    my @contents;
+
+    if(-f $location) {
+	$st = stat($location);
+	return $st->size;
+    } else {
+	if (!opendir(DIR, $location)) {
+	    print "in rfilesize $location, opendir failed on $location: $!";
+	    return $totalsize;
+	}
+
+	while($item = readdir(DIR)) {
+	    push(@contents, $item);
+	}
+	closedir(DIR);
+	
+	foreach $item(@contents) {
+	    if($item ne "." && $item ne "..") {
+		$totalsize += rfilesize($location . "/" . $item);
+	    }
+	}
+    }
+    
+    return $totalsize;
+}

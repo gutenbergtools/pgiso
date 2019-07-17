@@ -1,0 +1,36 @@
+                 "htm" => "Web: html",
+                 "txt" => "Plain text: txt",
+
+                 "epub" => "Book reader: epub",
+                 "mobi" => "Book reader: mobi (Kindle)",
+
+                 "lit" => "Book reader (old): lit",
+                 "pdb" => "Book reader (old): pdb",
+
+                 //    "tif" => "Image: tiff",
+                 //    "jpg" => "Image: jpg",
+
+                 "mp3" => "Audio: mp3",
+                 "wav" => "Audio: wav",
+                 "zip-avi" => "Audio: avi",
+
+                 "ly"  => "Music: ly",
+                 "mid" => "Music: midi",
+
+                 "zip-mov" => "Movie: mov",
+                 "zip-mpg" => "Movie: mpg",
+
+                 "pdf" => "Print layout: pdf",
+                 "ps"  => "Print layout: ps",
+
+                 "rst" => "Markup: Restructured Text",
+                 "tex" => "Markup: tex",
+                 "xml" => "Markup: xml",
+
+                 "doc" => "Word processor: doc",
+                 "rtf" => "Word processor: rtf",
+
+                 "zip-txt" => "Compressed (zip): txt",
+                 "zip-htm" => "Compressed (zip): html",
+                 "zip-doc" => "Compressed (zip): doc",
+                 "zip-rtf" => "Compressed (zip): rtf",

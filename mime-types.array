@@ -1,0 +1,38 @@
+"text/plain" => "txt",
+"text/html" => "htm",
+"application/epub+zip" => "epub",
+"application/x-mobipocket-ebook" => "mobi",
+"application/x-qioo-ebook" => "qioo",
+"application/prs.plucker" => "plucker",
+"audio/mpeg" => "mp3",
+"audio/ogg" => "ogg",
+"audio/mp4" => "mp4",
+"audio/midi" => "midi",
+"application/pdf" => "pdf",
+"text/xml" => "xml",
+"text/x-rst" => "rst",
+"application/prs.tei" => "tei",
+"text/rtf" => "rtf",
+
+# Exclude individual images:
+# "image/jpeg" => "jpg",
+# "image/png" => "png",
+# "image/gif" => "gif",
+# "image/tiff" => "tiff",
+#
+# Exclude due to ambiguity, small interest: Lily, MIDI, AVI, WAV...
+# "application/octet-stream" => "applications",
+# Exclude CD/DVD images:
+# "application/x-iso9660-image" => "iso",
+#
+# Exclude minor formats with few files:
+# "application/prs.tex" => "tex",
+# "application/msword" => "word",
+# "audio/x-wav" => "wav",
+# "audio/x-ms-wma" => "wma",
+# "application/x-mslit-ebook" => "lit",
+# "application/vnd.palm" => "palm",
+# "video/mpeg" => "mpeg",
+# "application/postscript" => "ps",
+# "video/quicktime" => "quicktime",
+# "video/x-msvideo" => "msvideo"

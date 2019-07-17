@@ -1,0 +1,282 @@
+#!/usr/local/bin/perl 
+
+#######################################
+# Coded by Craig Stephenson           #
+# Arctic Region Supercomputing Center #
+# University of Alaska Fairbanks      #
+# July 2005                           #
+#######################################
+
+use XML::LibXML;
+use DBI;
+use File::Basename;
+use File::stat;
+
+# set the paths
+my $path = "/home/cstephen/pgiso/pgrdf/";
+my $mirrorpath = "/data1/ftp/mirrors/gutenberg/";
+
+# create an array of valid formats to search for
+my @formats = ("htm","mid","mp3","pdb","pdf","ps","tex","txt","zip-avi",
+               "zip-htm","zip-mov","zip-mpg","zip-txt","zip-wmv");
+ 
+# MySQL connection info
+my $mysql_host = "localhost";
+my $mysql_database = "gutenberg";
+my $mysql_username = "pgdbupdate";
+my $mysql_password = "sealab2021";
+
+# connect to MySQL and prepare for UTF-8 input/output
+my $dbh = DBI->connect("DBI:mysql:$mysql_database:$mysql_host", $mysql_username, $mysql_password);
+$dbh->do("SET NAMES 'utf8'");
+
+# download and decompress rdf catalog file
+system("rm " . $path . "catalog.rdf.bz2 " . $path . "catalog.rdf 2> /dev/null");
+system("wget -q -O " . $path . "catalog.rdf.bz2 http://www.gutenberg.org/feeds/catalog.rdf.bz2");
+system("bunzip2 " . $path . "catalog.rdf.bz2");
+
+# catalog.rdf is in utf-8 so stdout should be utf-8 too
+binmode(STDOUT, ':utf8');
+
+# parse catalog.rdf
+my $parser = XML::LibXML->new();
+$parser->keep_blanks (0);
+my $doc = $parser->parse_file($path . 'catalog.rdf');
+
+# %books will store the XML metadata
+my %books;
+
+# parse book nodes
+my @booknodes = $doc->findnodes('/rdf:RDF/pgterms:etext');
+
+foreach my $booknode(@booknodes)
+{
+  # this is a book description node
+  my $etext_no = $booknode->getAttribute('ID');
+  $etext_no =~ s/^etext//;
+  my $o = {};
+
+  foreach $title ($booknode->findnodes('dc:title//text()'))
+  {
+    push @{$o->{'titles'}}, $title->textContent;
+  }
+  foreach $creator ($booknode->findnodes('dc:creator//text()'))
+  {
+    push @{$o->{'authors'}}, $creator->textContent;
+  }
+  foreach $language ($booknode->findnodes('dc:language//text()'))
+  {
+    push @{$o->{'language'}}, $language->textContent;
+  }
+  $books{$etext_no} = $o;
+}
+
+# release some memory
+@booknodes = undef;
+
+# parse file nodes
+my @filenodes = $doc->findnodes('/rdf:RDF/pgterms:file');
+
+foreach my $filenode (@filenodes)
+{
+  foreach my $n ($filenode->findnodes('dcterms:isFormatOf'))
+  {
+    # this is a file description node
+    my $etext_no = $n->getAttribute('resource');
+    $etext_no =~ s/^\#etext//;
+    push @{$books{$etext_no}->{'files'}}, $filenode->getAttribute('about');
+  }
+}
+
+# release some memory
+@filenodes = undef;
+$doc = undef;
+
+while(my ($etext_no, $o) = each(%books))
+{
+  my $titles;
+  my $authors;
+  my $language;
+
+  foreach(@{$o->{'titles'}})
+  {
+    $titles .= "$_;";
+  }
+  chop($titles); 
+
+  foreach(@{$o->{'authors'}})
+  {
+    $authors .= "$_;";
+  }
+  chop($authors);
+
+  foreach(@{$o->{'language'}})
+  {
+    $language .= substr("$_", 0, 2) . ";";
+  }
+  chop($language);
+
+  # if this etext contains its own HTML directory, the individual HTML files will be ignored and
+  # only the HTML directory will remain, to be scanned for HTML and image files manually
+  if(grep(/htm$/, @{$o->{'files'}}) && grep(/-h\//, @{$o->{'files'}}) && !grep(/mp3$/, @{$o->{'files'}}))
+  {
+    foreach my $file(@{$o->{'files'}})
+    {
+      # go to next iteration if this is not an HTML file, or is but not in an etext-specific home directory
+      if(substr($file, -3) ne "htm" || (substr($file, -3) eq "htm" && $file !~ /-h\//))
+      {
+        next;
+      }
+
+      # if an HTML file in an etext-specific home directory is found, start creating a new files
+      # array by pushing all non-HTML files into it
+      foreach my $tempfile(@{$o->{'files'}})
+      {
+        if($tempfile !~ /htm$/)
+        {
+          push(@tempfiles, $tempfile);
+        }
+      }
+
+      # after pushing all non-HTML files into @tempfiles, push the HTML directory location in
+      push(@tempfiles, dirname($file));
+      last;
+    }
+    @{$o->{'files'}} = @tempfiles;
+    undef(@tempfiles);
+  }
+
+  foreach my $file(@{$o->{'files'}})
+  {
+    # just in case empty strings found their way in, ignore them
+    if($file eq "")
+    {
+      next;
+    }
+
+    # $filepath is the location of the file in the local mirror
+    $subloc = $file;
+    $subloc =~ s/http:\/\/www.gutenberg.org\/dirs\///;
+    $filepath = $mirrorpath . $subloc;
+
+    # split $filepath into extension and everything preceeding the extension
+    @location = split(/\./, $filepath);
+    $extension = pop(@location);
+    $before_ext = pop(@location);
+
+    # if any file in this etext is an MP3, this must be an audio book, so all non-MP3 files are also
+    # part of the MP3 package
+    if(grep(/mp3$/, @{$o->{'files'}}))
+    {
+      $extension = "mp3";
+    }
+    # zipped QuickTime movie
+    elsif($extension eq "zip" && substr($before_ext, -2) eq "qt")
+    {
+      $extension = "zip-mov";
+    }
+    # zipped AVI
+    elsif($extension eq "zip" && substr($before_ext, -3) eq "avi")
+    {
+      $extension = "zip-avi";
+    }
+    # zipped MPEG
+    elsif($extension eq "zip" && substr($before_ext, -3) eq "mpg")
+    {
+      $extension = "zip-mpg";
+    }
+    # zipped WMV
+    elsif($extension eq "zip" && substr($before_ext, -3) eq "wmv")
+    {
+      $extension = "zip-wmv";
+    }
+    # zipped HTML directory
+    elsif($extension eq "zip" && substr($before_ext, -2) eq "-h")
+    {
+      $extension = "zip-htm";
+    }
+    # any other ZIP must be TXT
+    elsif(substr($extension, 0, 3) eq "zip")
+    {
+      $extension = "zip-txt";
+    }
+    # if $filepath is a directory ending in "-h", this is an HTML directory, thus HTML format
+    elsif(-d $filepath && substr($filepath, -2) eq "-h")
+    {
+      $extension = "htm";
+    }
+
+    # calculate the total file size of all files belonging to this format, but only if the extension
+    # has been listed in the array of valid formats (to exclude miscellaneous file extensions)
+    if(-e $filepath && grep(/$extension/, @formats))
+    {
+      push(@{$formatfiles{$extension}}, $subloc);
+      $sizes{$extension} += rfilesize($filepath);
+    }
+  }
+
+  # create a row insertion statement for each format in which this etext is available, and load these statements
+  # into @sql_commands so they can be entered rapidly after deleting the old records
+  foreach $key(keys %formatfiles)
+  {
+    if(@{$formatfiles{$key}} ne undef)
+    {
+      $sql = "INSERT INTO formats_sizes VALUES ('" . $etext_no . "','" . quotemeta($titles) . "','" .
+             quotemeta($authors) . "','" . $language . "','" . $key . "','" . $sizes{$key} . "','" .
+             join(";", @{$formatfiles{$key}}) . "')";
+      push(@sql_commands, $sql);
+    }
+  }
+
+  # clear variables for next etext
+  foreach $key(keys %formatfiles)
+  {
+    undef(@{$formatfiles{$key}});
+    undef($formatfiles{$key});
+    undef(@{$sizes{$key}});
+    undef($sizes{$key});
+  }
+  undef(@formatfiles);
+  undef($mp3switch);
+}
+
+# delete the old records and immediately perform all the pre-loaded insertion statements.
+# this is done to minimize table downtime
+$dbh->do("DELETE FROM formats_sizes");
+foreach $sql(@sql_commands)
+{
+  $dbh->do($sql);
+}
+
+# recursive file size function
+sub rfilesize
+{
+  my $location = $_[0];
+  my $totalsize;
+  my @contents;
+
+  if(-f $location)
+  {
+    $st = stat($location);
+    return $st->size;
+  }
+  else
+  {
+    opendir(DIR, $location);
+    while($item = readdir(DIR))
+    {
+      push(@contents, $item);
+    }
+    closedir(DIR);
+
+    foreach $item(@contents)
+    {
+      if($item ne "." && $item ne "..")
+      {
+        $totalsize += rfilesize($location . "/" . $item);
+      }
+    }
+  }
+
+  return $totalsize;
+}

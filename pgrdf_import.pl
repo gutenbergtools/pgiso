@@ -1,0 +1,444 @@
+#!/usr/bin/perl -Wall 
+
+########################################
+# Coded by Craig Stephenson            #
+# Arctic Region Supercomputing Center  #
+# University of Alaska Fairbanks       #
+# August 2005                          #
+# Updated by Greg Newby, December 2009 #
+# and December 2011                    #
+########################################
+
+use XML::LibXML;
+use DBI;
+use File::Basename;
+use File::stat;
+use Switch;
+sub pgpath($);     # forward declaration of local function
+sub mungepath($$); # forward declaration of local function
+my %sizes;         # Global to track sizes of eBook files
+
+# Project Gutenberg filetype priority order, since there can be
+# multiple files of a particular type
+#
+# Text (this should always exist):
+#  cache: pg2055.txt.utf8 --> need to rename, strip .utf8
+#
+# HTML
+#  old: x/x-h/* (including subdirectories)
+#  cache: .html.utf8 (this should always exist) --> need to rename, strip .utf8
+#
+# EBook: (there are just a few hand-crafted in the collection)
+#  old: *epub (probably doesn't exist)
+#  old: *mobi (probably doesn't exist)
+#  cache: *epub
+#  cache: *epub
+
+# Set the paths for files, these will be inserted into the database
+my $path = "/home/gbnewby/pgiso/pgrdf/";
+my $mirrorpath = "/data/htdocs/gutenberg/";
+my $feeds = "/htdocs/gutenberg/cache/epub/feeds/rdf-files.tar.bz2";
+my $sed = ${path} . "catalog.sed";
+my $head = ${path} . "catalog.head";
+my $tail = ${path} . "catalog.tail";
+
+# These need to match /htdocs/pgiso/index.php
+my %mimetypes = (
+    "text/plain" => "txt",
+    "text/html" => "htm",
+    "application/epub+zip" => "epub",
+    "application/x-mobipocket-ebook" => "mobi",
+    "application/x-qioo-ebook" => "qioo",
+    "application/prs.plucker" => "plucker",
+    "audio/mpeg" => "mp3",
+    "audio/ogg" => "ogg",
+    "audio/mp4" => "mp4",
+    "audio/midi" => "midi",
+    "application/pdf" => "pdf",
+    "text/xml" => "xml",
+    "text/x-rst" => "rst",
+    "application/prs.tei" => "tei",
+    "text/rtf" => "rtf"
+
+# Exclude individual images:
+# "image/jpeg" => "jpg",
+# "image/png" => "png",
+# "image/gif" => "gif",
+# "image/tiff" => "tiff",
+#
+# Exclude due to ambiguity, small interest: Lily, MIDI, AVI, WAV...
+# "application/octet-stream" => "applications",
+#
+# Exclude CD/DVD images:
+# "application/x-iso9660-image" => "iso",
+#
+# Exclude minor formats with few files:
+# "application/prs.tex" => "tex",
+# "application/msword" => "word",
+# "audio/x-wav" => "wav",
+# "audio/x-ms-wma" => "wma",
+# "application/x-mslit-ebook" => "lit",
+# "application/vnd.palm" => "palm",
+# "video/mpeg" => "mpeg",
+# "application/postscript" => "ps",
+# "video/quicktime" => "quicktime",
+# "video/x-msvideo" => "msvideo"
+    );
+
+#####
+# MySQL connection info & initialization:
+my $mysql_host = "localhost";
+my $mysql_sock = "/var/run/mysqld/mysqld.sock";
+my $mysql_database = "gutenberg";
+my $mysql_username = "pgdbupdate";
+my $mysql_password = "sealab2021";
+
+# Connect to MySQL and prepare for UTF-8 input/output
+my $dbh = DBI->connect("DBI:mysql:mysql_socket=$mysql_sock:$mysql_database:$mysql_host", $mysql_username, $mysql_password);
+if (! $dbh) { die "DBI->connect failed: $!" };
+$dbh->do("SET NAMES 'utf8'");
+
+# We will write into a temporary table, then rename the original:
+$dbh->do("drop table if exists formats_sizes_temp");
+$dbh->do("create table formats_sizes_temp (  `id` int(11) DEFAULT NULL,  `title` text,  `author` text,  `language` varchar(2) DEFAULT NULL,  `format` varchar(15) DEFAULT NULL,  `size` bigint(20) DEFAULT NULL,  `files` text,  `copyright` tinyint(1) DEFAULT NULL,  KEY `id_format` (`id`,`format`)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+##### 
+# Prepare input file.  Note, we already have a local copy of this file:
+#   http://www.gutenberg.org/cache/epub/feeds/rdf-files.tar.bz2  
+system ("/bin/rm -f " . $path . "catalog.rdf catalog.in catalog.temp");
+system ("/bin/tar -O -xjf ${feeds} > ${path}catalog.in");
+system ("/bin/cat ${path}catalog.in | /bin/sh $sed > ${path}catalog.temp");
+system ("/bin/cat $head ${path}catalog.temp $tail > ${path}catalog.rdf");
+
+# catalog.rdf is in utf-8 so stdout should be utf-8 too
+binmode(STDOUT, ':utf8');
+
+#####
+# parse catalog.rdf
+#print "gbn: 1\n";
+my $parser = XML::LibXML->new();
+$parser->keep_blanks (0);
+my $doc = $parser->parse_file($path . 'catalog.rdf');
+#print "gbn: 2\n";
+
+# %books stores the XML metadata, it looks like this:
+#
+# %books --> (etext_no) --> titles
+#                       \-> authors
+#                       \-> language
+#                       \-> files --> txt --> (file URLs)
+#                                 \-> zip-txt --> (file URLs)
+#                                 \-> htm --> (file URLs)
+#                                 \-> zip-htm --> (file URLs)
+#                                 \-> ...
+my %books;
+
+#####
+# Parse book nodes, for all etexts
+my @booknodes = $doc->findnodes('/rdf:RDF/pgterms:ebook');
+
+#####
+# Extract metadata into our data structures
+foreach my $booknode(@booknodes) {
+
+    my $etext_no = $booknode->getAttribute('rdf:about');
+    $etext_no =~ s/^ebooks\///;
+
+    my $o = {};
+
+    foreach $title ($booknode->findnodes('dcterms:title//text()')) {
+	push @{$o->{'titles'}}, $title->textContent;
+    }
+    foreach $creator ($booknode->findnodes('dcterms:creator//text()')) {
+	push @{$o->{'authors'}}, $creator->textContent;
+    }
+    foreach $language ($booknode->findnodes('dcterms:language//text()')) {
+	push @{$o->{'language'}}, $language->textContent;
+    }
+    foreach $rights ($booknode->findnodes('dcterms:rights//text()')) {
+	push @{$o->{'rights'}}, $rights->textContent;
+    }
+    $books{$etext_no} = $o;
+
+
+#####
+#  Parse file nodes.  These are all the files for this etext
+    my @filenodes = $booknode->findnodes('dcterms:hasFormat/pgterms:file');
+
+    # For each file:
+    foreach my $filenode (@filenodes) {
+
+        # Actually, there is only one per pgterms:file, though
+        # there can be multiple pgterms:file per ebook_no)
+	foreach my $n ($filenode->findnodes('dcterms:isFormatOf')) {
+	    my @vnformats;
+
+	    # The file's MIME type:
+	    foreach my $fn ($filenode->findnodes('dcterms:format')) {
+		my @imtns = $fn->findnodes('rdf:Description');
+		my $imtn = pop(@imtns);
+		my @vns = $imtn->findnodes('rdf:value');
+		my $vn = pop(@vns);
+
+                # MIME types might include a ; and subtype; we just want main:
+		my $mvn = $vn->textContent;
+		$mvn =~ s/; .*//;
+# debug:	print "mime=" . $mvn . ".\n";
+		push @vnformats, $mvn;
+	    }
+
+#####
+# File paths & MIME type:
+#
+# Note that this should skip any files that don't match %mimetypes
+            # See whether there is a file for each type (inefficient loop!)
+	    my $relpath="";
+	    foreach my $mime (keys %mimetypes) {
+		$qmime = quotemeta($mime);
+
+		# We'll munge the name for .zip formats:
+		if (grep(/application\/zip/, @vnformats) 
+		    && grep(/$qmime/, @vnformats)) {
+		    my $zipsymbol = "zip-" . $mimetypes{$mime};
+		    $relpath = mungepath($filenode->getAttribute('rdf:about'), $etext_no);
+		    last if $relpath =~ /\.txt$/; # Policy: use .utf8
+		    push @{$books{$etext_no}->{'files'}{$zipsymbol}}, $relpath;
+# debug:            print "debug zip: pushed relpath=$relpath\n";
+		    last;
+		} elsif (grep(/$qmime/, @vnformats)) {
+		    $relpath = mungepath($filenode->getAttribute('rdf:about'), $etext_no);
+		    last if $relpath =~ /\.txt$/; # Policy: use .utf8
+
+		    # Here, we will explicitly push the images subdir
+		    # for make_iso.pl:
+#		    if ($relpath =~ /${etext_no}-h.htm$/) {
+#			my $newpath = $relpath;
+#			$newpath =~ s/${etext_no}-h\.htm/images/;
+#			push @{$books{$etext_no}->{'files'}{$mimetypes{$mime}}}, $newpath;
+#		    }
+		    push @{$books{$etext_no}->{'files'}{$mimetypes{$mime}}}, $relpath;
+#debug:		    print "debug relpath=$relpath\n";
+		    last;
+		}
+	    }
+
+            # File size.  There should just be one:
+	    my @szs = $filenode->findnodes('dcterms:extent');
+	    my $sz = pop(@szs);
+	    # This is putting 'size' as a key.  um...
+###	    push @{$books{$etext_no}->{'files'}{'size'}}, $sz->textContent;
+	    $sizes{$relpath} = $sz->textContent;
+# debug:    print "size=" . $sz->textContent . "\n";
+
+	}
+    } # Done with filenodes
+}
+
+# release some memory
+@booknodes = undef;
+$doc = undef;
+
+#####
+# Populate records; insert into database
+while (my ($etext_no, $o) = each(%books)) {
+#    print "debug: starting #$etext_no ... ";
+    my $titles='';
+    my $authors='';
+    my $language='';
+    my $copyrighted='';
+    my $sql=''; my $firstsql=1;
+
+    foreach(@{$o->{'titles'}}) {
+	$titles .= "$_;";
+    }
+    chop($titles); 
+
+    foreach(@{$o->{'authors'}}) {
+	$authors .= "$_;";
+    }
+    chop($authors);
+
+    foreach(@{$o->{'language'}}) {
+#	$language .= substr($_, 0, 2) . ";";
+	$language .= "$_;";
+    }
+    chop($language);
+
+    $copyrighted = 0;
+    foreach(@{$o->{'rights'}}) {
+#	if($_ eq "Copyrighted work. See license inside work.") {
+	if($_ =~ "Copyrighted") {
+	    $copyrighted = 1;
+	}
+    }
+
+### create a row insertion statement for each format for this etext
+    foreach my $key (keys %{$books{$etext_no}->{'files'}}) {
+
+# $size might not have gotten a value, above:
+	my $size=0;
+
+	foreach my $relpath (@{$books{$etext_no}->{'files'}{$key}}) {
+#	    my $filepath = $mirrorpath . $relpath;
+	    $size=$sizes{$relpath}
+	}
+	
+# We will aggregate all of the SQL values into one query, for this title:
+	if ($firstsql) {
+	    $sql = "INSERT INTO formats_sizes_temp VALUES ";
+	    $firstsql=0;
+	} else {
+	    $sql = $sql . ", "; # delimeter for multiple sets of values
+	}
+
+	# Append the new set of values:
+	$sql = $sql . "('" . $etext_no . "','" . quotemeta($titles) . "','"
+	    . quotemeta($authors) . "','" . $language . "','" . $key . "','"
+	    . $size . "','" 
+	    . quotemeta(join(";", @{$books{$etext_no}->{'files'}{$key}}))
+	    . "'," . $copyrighted . ")";
+    }
+
+### Actually insert the data for this title into the database:
+
+# Test for empty sql string.  This happens sometimes: entries without files
+    if ($sql ne '') {
+	$dbh->do($sql);
+#	print "debug: sql is: $sql\n\n";
+    }
+
+# Clear variables for next title:
+    $sql="";
+    foreach $key(keys %formatfiles) {
+	undef(@{$formatfiles{$key}});
+	undef($formatfiles{$key});
+	undef(@{$sizes{$key}});
+	undef($sizes{$key});
+    }
+    undef(@formatfiles);
+
+# Done with this etext.  Back for the next one
+}
+
+### We're done with all etexts.  Rename the database table:
+# gbn: race condition?
+# $dbh->do("drop table if exists formats_sizes");
+$dbh->do("drop table if exists formats_sizes_old");
+$dbh->do("rename table formats_sizes to formats_sizes_old");
+$dbh->do("rename table formats_sizes_temp to formats_sizes");
+
+### All done.  Bye!
+$dbh->disconnect();
+exit;
+
+
+#####
+# pathmunge: This implements our weird policy for file locations,
+# which on www.gutenberg.org are processed by the server.  We need
+# to map them to "real" locations in the mirror:
+
+#
+# The paths from the input RDF have three forms:
+# 1. http://www.gutenberg.org/files/1001/1001.txt
+#   This is shorthand for the true path, like 1/0/0/1001/
+# 2. http://www.gutenberg.org/ebooks/1001/pg1001.txt.utf8
+#   This is for auto-generated content; lives under cache/generated/1001
+# 3. http://www.gutenberg.org/dirs/etext98/anapr10.txt
+#   This is for legacy files
+
+# We also need to map filenames.  The cache/generated filenames are NOT
+# the same as what the URL shows, due to back-end server magic.
+#
+#  Actual:			RDF database:
+# pg40047-images.epub		pg40047.epub.images
+# pg40047.epub			pg40047.epub.noimages
+# pg40047-images.mobi		pg40047.kindle.images
+# pg40047.mobi			pg40047.kindle.noimages
+# pg40047.plucker.pdb		pg40047.plucker
+# pg40047.qioo.jar		pg40047.qioo
+# pg40047.txt.utf8		pg40047.txt.utf-8
+# pg10004.html.utf8		pg10004.html.gen  
+
+sub mungepath($$) { 
+    
+    my $relpath = $_[0];
+    my $etext_no = $_[1];
+
+    # Generated files:
+    if ($relpath =~ /\/ebooks/) {
+	$relpath =~ s/http:\/\/www\.gutenberg\.org\/ebooks\//cache\/generated\/$etext_no\/pg/; 
+	$relpath =~ s/\.epub\.images/-images\.epub/;
+	$relpath =~ s/\.epub\.noimages/\.epub/;
+	$relpath =~ s/\.kindle\.images/-images.mobi/;
+	$relpath =~ s/\.kindle\.noimages/\.mobi/;
+	$relpath =~ s/\.plucker/\.plucker\.pdb/;
+	$relpath =~ s/\.qioo/\.qioo\.jar/;
+	$relpath =~ s/\.utf-8/\.utf8/;
+	$relpath =~ s/\.gen/\.utf8/;  # might be too general - is this just HTM?
+
+	# Static files:
+    } elsif ($relpath =~ /\/files\//) {
+	my $base = pgpath($etext_no);
+	$relpath =~ s/http:\/\/www\.gutenberg\.org\/files\//$base/;
+	
+	# Legacy files:
+    }
+    elsif ($relpath =~ /\/dirs\//) {
+	$relpath =~ s/http:\/\/www.gutenberg.org\/dirs\///;
+    }
+    
+    return($relpath);
+}
+    
+#####
+# pgpath: for www.gutenberg.org/files mapping to 'true' location:
+# This is my pgpath.pl program, slightly adjusted for use as a function
+
+# For a filename argument, extract the path by inserting a slash
+# between the numbers.  Skip the last number.  Ditch anything else.
+# Part of the Gutenberg upload procedure.
+
+sub pgpath($) {
+    my $infile=$_[0]; my $outdir="";
+    sub get_basename ($); # Trim after the last slash
+    
+    $infile = get_basename($infile);
+    
+# Loop over all characters, appending a / after each number, and
+# ignoring the rest.
+    for (my $i=0; $i<length($infile); $i++) {
+	if (substr($infile,$i,1) =~ "[0-9]" ) {
+	    $outdir = $outdir . substr($infile,$i,1) . '/';
+	}
+    }
+
+# Ditch the last:
+my $where = rindex ($outdir, "/");
+if ($where ne "-1") { 
+    $outdir = substr($outdir, 0, $where -1 ); # It's always 1 digit
+} # No / in path
+
+# Done: return
+if (length($outdir)) {
+# debug:  print $outdir . "\n";
+    return ($outdir);
+}
+
+print "pgpath: error: no digits in input name\n";
+exit(1);
+	}
+
+#####
+# get_basename: Called by pgpath
+sub get_basename($) {
+    
+    my $where = rindex ($_[0], "/");
+    if ($where eq "-1") { 
+	$where = rindex ($_[0], "\\");  # Try DOS-style too
+    }	
+    if ($where eq "-1") { return $_[0]; } # No / in path
+    
+    # Got a / or \, so make a new string:
+    my $base = substr($_[0], $where+1);
+    return $base;
+}

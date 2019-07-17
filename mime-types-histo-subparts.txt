@@ -1,0 +1,62 @@
+  67466 application/epub+zip
+    112 application/msword
+   2336 application/octet-stream
+   2634 application/pdf
+     11 application/postscript
+  43101 application/prs.plucker
+    621 application/prs.tei
+    272 application/prs.tex
+     18 application/vnd.palm
+    278 application/x-iso9660-image
+  67039 application/x-mobipocket-ebook
+     20 application/x-mslit-ebook
+  43242 application/x-qioo-ebook
+ 112392 application/zip
+   2750 audio/midi
+   9768 audio/mp4
+  23319 audio/mpeg
+  19450 audio/ogg
+     37 audio/x-ms-wma
+     40 audio/x-wav
+   1117 image/gif
+  17478 image/jpeg
+   2386 image/png
+    631 image/tiff
+  15926 text/html
+      2 text/html; charset=euc-kr
+  50795 text/html; charset=iso-8859-1
+     26 text/html; charset=iso-8859-15
+     18 text/html; charset=iso-8859-2
+   7277 text/html; charset=us-ascii
+   8419 text/html; charset=utf-8
+      4 text/html; charset=windows-1251
+     11 text/html; charset=windows-1252
+     10 text/html; charset=windows-1253
+  21056 text/plain
+      3 text/plain; charset=big5
+      2 text/plain; charset=euc-kr
+      8 text/plain; charset=ibm437
+      8 text/plain; charset=ibm850
+  60216 text/plain; charset=iso-8859-1
+     25 text/plain; charset=iso-8859-15
+     20 text/plain; charset=iso-8859-2
+      6 text/plain; charset=iso-8859-3
+      8 text/plain; charset=iso-8859-7
+      4 text/plain; charset=macintosh
+  71742 text/plain; charset=us-ascii
+      2 text/plain; charset=utf-16
+  32900 text/plain; charset=utf-8
+      6 text/plain; charset=windows-1250
+      8 text/plain; charset=windows-1251
+     51 text/plain; charset=windows-1252
+     10 text/plain; charset=windows-1253
+      4 text/plain; charset=x-other
+    277 text/rtf
+      8 text/rtf; charset=iso-8859-1
+      1 text/rtf; charset=us-ascii
+   1062 text/xml
+      8 text/xml; charset=iso-8859-1
+    915 text/x-rst
+     11 video/mpeg
+      3 video/quicktime
+      2 video/x-msvideo

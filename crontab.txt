@@ -1,0 +1,5 @@
+# Check if we are getting too large in the ISO directory:
+0 23 * * * /home/gbnewby/pgiso/isodiralert.pl
+#
+# Daily repopulation of CD/DVD ISO database
+10 20 * * * cd /home/gbnewby/pgiso/pgrdf ; ./pgrdf_import.pl
